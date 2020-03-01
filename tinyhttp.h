@@ -7,7 +7,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/sendfile.h>
 
-
+enum request {GET, HEAD, POST, PUT, DELETE, TRACE, OPTIONS, CONNECT, PATCH, INVALID};
 
 #endif

@@ -1,16 +1,134 @@
 #include "tinyhttp.h"
 
-void thttp_send(char * file, struct sockaddr_in client)
+int thttp_parse_path(char * in, char * out, size_t n)
 {
+  if(strstr(in, "..")) return 0;
+  int ret;
+  if(in[strlen(in) - 1] == '/')
+    ret = snprintf(out, n, ".%sindex.html", in);
+  else
+    ret = snprintf(out, n, ".%s", in);
+  return ret > 0 && ret < n;
+}
 
+void thttp_handle_get(int cli, char * path)
+{
+  FILE * f = fopen(path, "r");
+  if(!f)
+  {
+    printf("File not found");
+    shutdown(cli, 2);
+    return;
+  }
+  fseek(f, 0L, SEEK_END);
+  size_t len = ftell(f);
+  send(cli, "HTTP/1.1 200 OK\r\n", 17, 0);
+  char obuff[1024];
+  len = snprintf(obuff, 1024, "Content-Length: %lu\r\n\r\n", len);
+  send(cli, obuff, len, 0);
+  rewind(f);
+  while(len = fread(obuff, 1, 1024, f))
+  {
+    send(cli, obuff, len, 0);
+  }
+  shutdown(cli, 2);
+}
+
+int thttp_rcvline(int sock, char * buf, int n)
+{
+  int cr = 0;
+  int off = 0;
+
+  while(recv(sock, buf + off, 1, 0) > 0 && off < n)
+  {
+    if(buf[off] == '\n')
+    {
+      if(cr)
+      {
+        buf[off - 1] = '\0';
+        return 1;
+      }
+      else
+      {
+        return 0;
+      }
+    }
+    cr = (buf[off] == '\r');
+
+    off++;
+  }
+
+  return 0;
+}
+
+int thttp_recvwrd(int sock, char * buf, int n)
+{
+  int cr = 0; // CR flag
+  int off = 0; // Offset
+
+  while(recv(sock, buf + off, 1, 0) > 0 && off < n)
+  {
+    // Check for space
+    if(buf[off] == ' ')
+    {
+      buf[off] = '\0';
+      return 1;
+    }
+
+    // Check for end of line
+    if(buf[off] == '\n')
+    {
+      if(cr)
+      {
+        buf[off - 1] = '\0';
+        return 1;
+      }
+      else
+      {
+        // Invalid line
+        return 0;
+      }
+    }
+
+    // Set CR flag
+    cr = (buf[off] == '\r');
+
+    off++;
+  }
+
+  // Invalid line
+  return 0;
+}
+
+enum request thttp_req_parse(int cli)
+{
+  // Parse request type
+  char reqbuf[8];
+  thttp_recvwrd(cli, reqbuf, 8);
+
+  if(strcmp(reqbuf, "GET") == 0)
+    return GET;
+  else
+    return INVALID;
 }
 
 void thttp_serve(int cli)
 {
-  char buff[1024] = {0};
-  recv(cli, buff, 1024, 0);
-  printf("RECEIVED:\n\n%s\n", buff);
-  send(cli, "HTTP/1.1 200 OK\r\nContent-Length: 12\r\n\r\nHello world!", 56, 0);
+  char rawpath[512];
+  char path[600];
+
+  enum request req = thttp_req_parse(cli);
+  thttp_recvwrd(cli, rawpath, 512);
+  thttp_parse_path(rawpath, path, 600);
+
+  switch(req)
+  {
+    case GET:
+      thttp_handle_get(cli, path);
+    default:
+      break;
+  }
+
   shutdown(cli, 2);
 }
 
