@@ -1,5 +1,25 @@
 #include "tinyhttp.h"
 
+const char * RES_200 = "OK";
+const char * RES_404 = "Not Found";
+const char * RES_403 = "Forbidden";
+const char * RES_UND = "Undefined";
+
+const char * thttp_resstr(int code)
+{
+  switch(code)
+  {
+    case 200:
+      return RES_200;
+    case 404:
+      return RES_404;
+    case 403:
+      return RES_403;
+    default:
+      return RES_UND;
+  }
+}
+
 int thttp_parse_path(char * in, char * out, size_t n)
 {
   if(strstr(in, "..")) return 0;
@@ -11,25 +31,36 @@ int thttp_parse_path(char * in, char * out, size_t n)
   return ret > 0 && ret < n;
 }
 
+void thttp_sendhdr(int sock, int code)
+{
+  char buf[1024];
+  int l = snprintf(buf, 1024, "HTTP/1.1 %d %s\r\n", code, thttp_resstr(code));
+  printf("Sent header '%s'\n", buf);
+  send(sock, buf, l, 0);
+}
+
 void thttp_handle_get(int cli, char * path)
 {
+  printf("Trying to access %s\n", path);
   FILE * f = fopen(path, "r");
   if(!f)
   {
-    printf("File not found");
-    shutdown(cli, 2);
-    return;
+    printf("File not found\n");
+    thttp_sendhdr(cli, 404);
   }
-  fseek(f, 0L, SEEK_END);
-  size_t len = ftell(f);
-  send(cli, "HTTP/1.1 200 OK\r\n", 17, 0);
-  char obuff[1024];
-  len = snprintf(obuff, 1024, "Content-Length: %lu\r\n\r\n", len);
-  send(cli, obuff, len, 0);
-  rewind(f);
-  while(len = fread(obuff, 1, 1024, f))
+  else
   {
+    thttp_sendhdr(cli, 200);
+    fseek(f, 0L, SEEK_END);
+    size_t len = ftell(f);
+    char obuff[1024];
+    len = snprintf(obuff, 1024, "Content-Length: %lu\r\n\r\n", len);
     send(cli, obuff, len, 0);
+    rewind(f);
+    while(len = fread(obuff, 1, 1024, f))
+    {
+      send(cli, obuff, len, 0);
+    }
   }
   shutdown(cli, 2);
 }
@@ -124,6 +155,7 @@ void thttp_serve(int cli)
   switch(req)
   {
     case GET:
+      printf("GET\n");
       thttp_handle_get(cli, path);
     default:
       break;
@@ -149,13 +181,16 @@ void thttp_main(char * root, uint16_t port)
   listen(sock, 0);
 
   // Listen for connections
-  struct sockaddr_in cliaddr = {0};
-  socklen_t addrlen;
-  int clisock;
-  clisock = accept(sock, (struct sockaddr *)&cliaddr, (socklen_t *)&addrlen);
+  while(1)
+  {
+    struct sockaddr_in cliaddr = {0};
+    socklen_t addrlen;
+    int clisock;
+    clisock = accept(sock, (struct sockaddr *)&cliaddr, (socklen_t *)&addrlen);
 
-  // Serve request
-  thttp_serve(clisock);
+    // Serve request
+    thttp_serve(clisock);
+  }
 
   shutdown(sock, 2);
 }
